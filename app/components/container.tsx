@@ -6,7 +6,7 @@ export default function Container(props: React.HTMLProps<HTMLDivElement>) {
         <div
             {...props}
             className={cn(
-                "w-full bg-white/60 rounded-xl flex py-4 shadow-sm",
+                "w-full bg-white rounded-xl flex py-3 sm:py-4 shadow-sm",
                 props.className
             )}
         />

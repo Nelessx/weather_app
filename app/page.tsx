@@ -1,5 +1,6 @@
 'use client';
 
+import React from "react";
 import Image from "next/image";
 import Navbar from "./components/navbar";
 import { useQuery } from "@tanstack/react-query";
@@ -15,7 +16,6 @@ import { metersToKilometers } from "@/utils/metersToKilometers";
 import { convertWindSpeed } from "@/utils/convertWindSpeed";
 import ForcastWeatherDetail from "./components/forcastWeatherDetail";
 
-// const url = `https://api.openweathermap.org/data/2.5/weather?q=kathmandu&appid=18dd0608d519de38c2415a5b4ea8fa97`
 
 export type WeatherData = {
     cod: string;
@@ -77,24 +77,99 @@ export type ForecastEntry = {
 
 
 
+type CitySuggestion = {
+    name: string;
+    lat: number;
+    lon: number;
+    country: string;
+    state?: string;
+};
+
 export default function Home() {
-    const { isPending, error, data } = useQuery<WeatherData>({
-        queryKey: ['repoData'],
+    const [city, setCity] = React.useState("kathmandu");
+    const [searchInput, setSearchInput] = React.useState("");
+    const [citySuggestions, setCitySuggestions] = React.useState<CitySuggestion[]>([]);
+    const [showSuggestions, setShowSuggestions] = React.useState(false);
+    const [error, setError] = React.useState<string | null>(null);
+
+    const { isPending, error: queryError, data, refetch } = useQuery<WeatherData>({
+        queryKey: ['weatherData', city],
         queryFn: async () => {
-
-            const { data } = await axios.get(`https://api.openweathermap.org/data/2.5/forecast?q=kathmandu&appid=${process.env.NEXT_PUBLIC_WEATHER_API_KEY}&cnt=56`);
-            return data;
-
-        }
+            try {
+                const { data } = await axios.get(`https://api.openweathermap.org/data/2.5/forecast?q=${city}&appid=${process.env.NEXT_PUBLIC_WEATHER_API_KEY}&cnt=56`);
+                setError(null); // Clear error on success
+                return data;
+            } catch (err: any) {
+                // Handle 404 and other errors gracefully
+                if (err.response?.status === 404) {
+                    setError(`City "${city}" not found. Please try a different city.`);
+                } else {
+                    setError('Failed to fetch weather data. Please try again.');
+                }
+                throw err;
+            }
+        },
+        enabled: !!city,
+        retry: false, // Don't retry on error
     });
 
+    // Fetch city suggestions from OpenWeather Geocoding API
+    const fetchCitySuggestions = React.useCallback(async (query: string) => {
+        if (query.length < 2) {
+            setCitySuggestions([]);
+            return;
+        }
 
+        try {
+            const response = await axios.get(
+                `https://api.openweathermap.org/geo/1.0/direct?q=${query}&limit=5&appid=${process.env.NEXT_PUBLIC_WEATHER_API_KEY}`
+            );
+            setCitySuggestions(response.data);
+        } catch (error) {
+            console.error('Failed to fetch city suggestions:', error);
+            setCitySuggestions([]);
+        }
+    }, []);
 
+    // Debounce city suggestions
+    React.useEffect(() => {
+        const timer = setTimeout(() => {
+            if (searchInput) {
+                fetchCitySuggestions(searchInput);
+            } else {
+                setCitySuggestions([]);
+            }
+        }, 300); // 300ms debounce
+
+        return () => clearTimeout(timer);
+    }, [searchInput, fetchCitySuggestions]);
+
+    const handleSearch = (e: React.FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        if (searchInput.trim()) {
+            setCity(searchInput.trim());
+            setShowSuggestions(false);
+            setCitySuggestions([]);
+        }
+    };
+
+    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setSearchInput(e.target.value);
+        setShowSuggestions(true);
+    };
+
+    const handleSelectCity = (suggestion: CitySuggestion) => {
+        const cityName = suggestion.name;
+        setSearchInput(cityName);
+        setCity(cityName);
+        setShowSuggestions(false);
+        setCitySuggestions([]);
+    };
 
     const firstData = data?.list[0];
 
 
-    console.log("data", data);
+
 
 
     const uniqueDates = [
@@ -120,52 +195,64 @@ export default function Home() {
         </div>
     );
 
-    if (error) return 'An error has occurred: ' + error.message
+    if (queryError && !data) return (
+        <div className="flex items-center justify-center h-screen">
+            <p className="text-red-600">{error || 'An error has occurred. Please try again.'}</p>
+        </div>
+    )
 
 
 
     return (
         <div className="w-full flex flex-col items-center gap-8">
-            <Navbar />
+            <Navbar
+                city={data?.city.name || city}
+                searchValue={searchInput}
+                onSearchChange={handleInputChange}
+                onSearchSubmit={handleSearch}
+                citySuggestions={citySuggestions}
+                showSuggestions={showSuggestions}
+                onSelectCity={handleSelectCity}
+            />
 
-            <main className=" w-11/12 mx-auto flex flex-col gap-8 pb-10 pt-2">
+            <main className="w-full px-3 sm:px-4 md:w-11/12 mx-auto flex flex-col gap-4 sm:gap-6 md:gap-8 pb-10 pt-2">
 
                 {/* today's weather */}
-                <section className=" space-y-4      ">
-                    <div className=" space-y-4">
-                        <h2 className="flex items-center gap-1 text-2xl  text-gray-900/90">
+                <section className="space-y-3 sm:space-y-4">
+                    <div className="space-y-3 sm:space-y-4">
+                        <h2 className="flex flex-col sm:flex-row sm:items-center gap-1 text-xl sm:text-2xl text-gray-900/90">
                             <p>{format(parseISO(firstData?.dt_txt ?? ""), "EEEE")}</p>
-                            <p className="text-lg">({format(parseISO(firstData?.dt_txt ?? ""), "dd/MM/yyyy")})</p>
+                            <p className="text-base sm:text-lg">({format(parseISO(firstData?.dt_txt ?? ""), "dd/MM/yyyy")})</p>
                         </h2>
-                        <Container className=" gap-10 px-6 items-center"  >
+                        <Container className="flex-col sm:flex-row gap-4 sm:gap-6 md:gap-10 px-3 sm:px-4 md:px-6 items-center">
                             {/* temperature */}
-                            <div className="flex items-center justify-around">
-                                <div className="flex flex-col px-8 items-center ">
-                                    <span className="text-5xl text-gray-800">
+                            <div className="flex items-center justify-center w-full sm:w-auto">
+                                <div className="flex flex-col px-4 sm:px-6 md:px-8 items-center">
+                                    <span className="text-4xl sm:text-5xl md:text-6xl text-gray-800">
                                         {ConvertKelvinToCelsius(firstData?.main.temp ?? 0)}°
                                     </span>
-                                    <p className=" text-xs space-x-1 whitespace-nowrap">
+                                    <p className="text-xs sm:text-sm space-x-1 whitespace-nowrap">
                                         <span>Feels like</span>
                                         <span>
                                             {ConvertKelvinToCelsius(firstData?.main.feels_like ?? 0)}°C
                                         </span>
 
                                     </p>
-                                    <p className="text-xs flex items-center space-x-2">
-                                        <span className="flex items-center ">
-                                            {ConvertKelvinToCelsius(firstData?.main.temp_min ?? 0)}°<ArrowDown className="w-4 h-4" />{" "}
+                                    <p className="text-xs sm:text-sm flex items-center space-x-2">
+                                        <span className="flex items-center">
+                                            {ConvertKelvinToCelsius(firstData?.main.temp_min ?? 0)}°<ArrowDown className="w-3 h-3 sm:w-4 sm:h-4" />{" "}
                                         </span>
                                         <span className="flex items-center">
-                                            {ConvertKelvinToCelsius(firstData?.main.temp_max ?? 0)}°<ArrowUp className="w-4 h-4" />{" "}
+                                            {ConvertKelvinToCelsius(firstData?.main.temp_max ?? 0)}°<ArrowUp className="w-3 h-3 sm:w-4 sm:h-4" />{" "}
                                         </span>
                                     </p>
                                 </div>
                             </div>
 
                             {/* time and weather condition */}
-                            <div className="flex gap-10 items-center justify-between overflow-x-auto mr-4">
+                            <div className="flex gap-4 sm:gap-6 md:gap-10 items-center justify-start overflow-x-auto w-full pb-2">
                                 {data?.list.map((d, i) => (
-                                    <div key={i} className=" flex flex-col items-center gap-2 justify-between text-sm ">
+                                    <div key={i} className="flex flex-col items-center gap-1 sm:gap-2 justify-between text-xs sm:text-sm flex-shrink-0">
                                         <p className="whitespace-nowrap">{format(parseISO(d.dt_txt), "h:mm a")}</p>
                                         {/* <Weathericon iconName={d.weather[0].icon} /> */}
                                         <Weathericon iconName={getDayOrNightIcon(d.weather[0].icon, d.dt_txt)} />
@@ -177,10 +264,10 @@ export default function Home() {
                         </Container>
                     </div>
                     {/* more info */}
-                    <div className="flex  gap-4">
+                    <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
                         {/* left */}
-                        <Container className="w-fit  justify-center flex flex-col px-8 items-center ">
-                            <p className=" text-center capitalize text-gray-900">
+                        <Container className="w-full sm:w-fit justify-center flex flex-col px-4 sm:px-6 md:px-8 items-center">
+                            <p className="text-center capitalize text-gray-900 text-sm sm:text-base">
                                 {firstData?.weather[0].description}{" "}
                             </p>
                             <Weathericon
@@ -212,10 +299,10 @@ export default function Home() {
                 </section>
 
                 {/* 7 days forecast */}
-                <section className="flex w-full flex-col gap-6  ">
-                    <p className="text-2xl">Forcast (7 days)</p>
+                <section className="flex w-full flex-col gap-3 sm:gap-4 md:gap-6">
+                    <p className="text-xl sm:text-2xl">Forcast (7 days)</p>
                     {firstDataForEachDate.map((d, i) => (
-                        <ForcastWeatherDetail 
+                        <ForcastWeatherDetail
                             key={i}
                             description={d?.weather[0].description ?? ""}
                             weatherIcon={d?.weather[0].icon ?? "01d"}
